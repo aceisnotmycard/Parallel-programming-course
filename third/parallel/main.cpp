@@ -1,3 +1,4 @@
+#include <mpi.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -6,17 +7,17 @@
 
 // Input variables
 /* Количество ячеек вдоль координат x, y, z */
-int in;
-int jn;
-int kn;
-int a;
-double X, Y, Z;
-double e;
+ #define in 20
+ #define jn 20
+ #define kn 20
+int a = 1;
+double X = 2.0, Y = 2.0, Z = 2.0;
+double e = 0.00001;
 
 // MPI
 int rank, size;
 
-/* Выделение памяти для 3D пространства для текущей и предыдущей итерации */ 
+/* Allocating memory for current and previous iterations */ 
 double F[2][in+1][jn+1][kn+1];
 double hx, hy, hz;
 
@@ -27,32 +28,35 @@ double Fresh(double,double,double);
 double Ro(double,double,double); 
 
 /* Подпрограмма инициализации границ 3D пространства */ 
-void Inic();
+void Init();
 
 // Get number of rows in current layer
 int get_chunk_size(int given_rank);
 
-int main() {
+// Get number of rows below current layer
+int calculate_shift(int given_rank);
 
-	// input data
-	in = 20;
-	jn = 20;
-	kn = 20;
-	a = 1;
-	X = 2.0;
-	Y = 2.0;
-	Z = 2.0;
-	e = 0.00001;
+int main(int argc, char** argv) {
 
 	MPI_Init(&argc, &argv);
 	MPI_Comm_size(MPI_COMM_WORLD, &size);
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-	double max, N, t1, t2;
-	double owx, owy, owz, c;
-	double Fi, Fj, Fk, F1;
+	// calculating rank of neighbours
+	int neighbour_below_rank = (rank == size - 1) ? -1 : rank - 1;
+	int neighbour_above_rank = (rank == 0) ? -1 : rank + 1;
+	// allocating space for receiving data
+	double neighbour_above[in+1][jn+1];
+	double neighbour_below[in+1][jn+1];
 
-	int i, j, k, mi, mj, mk;
+	//calculating starting point of local array's part
+	int localZ = calculate_shift(rank);
+
+	double N, t1, t2;
+	double owx, owy, owz, c;
+	double Fi, Fj, Fk;
+
+	int i, j, k;
 	int R, fl, fcur_it, fl2;
 	int it,f, prev_it, cur_it;
 
@@ -73,10 +77,10 @@ int main() {
 	owy = pow(hy,2);
 	owz = pow(hz,2);
 	c = 2/owx + 2/owy + 2/owz + a;
-	gettimeofday(&tv1, 8(struct timezone*)0); 
+	gettimeofday(&tv1, (struct timezone*)0); 
 
 	/* Initialization of borders */
-	Inic();
+	Init();
 
 	/* Main cycle */
 	do { 
@@ -94,13 +98,15 @@ int main() {
 						f = 0;
 				} 
 			}
-	it++;
+		it++;
 	} while (f == 0);
 
 	gettimeofday(&tv2,(struct timezone*)0);
 	osdt = (tv2.tv_sec - tv1.tv_sec)*1000000 + tv2.tv_usec-tv1.tv_usec;
 	printf("\n in = %d iter = %d E = %f T = %ld\n",in,it,e,osdt);
 
+	double max, F1;
+	int mk, mj, mi;
 	/* Нахождение максимального расхождения полученного приближенного решения * и точного решения */
 	max = 0.0;
 	for(i = 1; i < in; i++) { 
@@ -121,16 +127,24 @@ int main() {
 }
 
 int get_chunk_size(int given_rank) {
-	int basic_chunk = N / size;
-	int rest = N % size;
+	int basic_chunk = kn / size;
+	int rest = kn % size;
 	return basic_chunk + (given_rank < rest ? 1 : 0);
+}
+
+int calculate_shift(int given_rank) {
+	int result = 0;
+	for (int i = 0; i < given_rank; i++) {
+		result += get_chunk_size(i);
+	}
+	return result;
 }
 
 double Fresh(double x,double y,double z) { 
 	return x + y + z;
 }
 
-void Inic() { 
+void Init() { 
 	int i, j, k;
 	for(i = 0; i <= in; i++) { 
 		for(j = 0; j <= jn; j++) { 
