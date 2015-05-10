@@ -19,31 +19,25 @@
 #define M 8
 #define N 8
 #define K 8
+
 #define A(i,j) A[N*i+j]
 #define B(i,j) B[K*i+j]
 #define C(i,j) C[K*i+j]
 
-/* Подпрограмма, осуществляющая перемножение матриц */
-/* Аргументы A, B, C, n, p значимы в данном случае только в ветви 0 */
-/* int *n - размеры исходных матриц */
-/* double *A, *B, *C; Исходные матрицы: A[n[0]][n[1]],
-                               B[n[1]][n[2]],
-                               C[n[0]][n[2]]; */
-/* Данные */
-//int *p;
-/* размеров решетки компьютеров. p[0] соответствует n[0], p[1]
- * соответствует n[2] и произведение p[0]*p[1] будет эквивалентно
- * размеру группы comm */
 
-/* Коммуникатор для процессов, участвующих в умножении матрицы на матрицу */
-//MPI_Comm comm;
+// Multiplies matrix A by matrix B
+// n – sizes of A, B, C
+// A[n[0]][n[1]]
+// B[n[1]][n[2]] 
+// C[n[0]][n[2]]
+// p – number of computers in comm's grid (p[0] x p[1])
 void PMATMAT_2(int *n, double *A, double *B, double *C, int *p, MPI_Comm comm) {
 
   /* Далее все описываемые переменные значимы во всех ветвях, в том числе
    * и ветви 0 */
-  double *AA, *BB, *CC;  /* Локальные подматрицы (полосы) */
-  int   nn[2]; /* Размеры полос в A и B и подматриц CC в C */
-  int coords[2]; /* Декартовы координаты ветвей */
+  double *AA, *BB, *CC;  /* Local submatrices (stripes) */
+  int   nn[2]; /* sizes of stripes in A (nn[0]), B (nn[1]) and submatrices in C */
+  int coords[2]; /* Декартовы координаты ветвей */
   int rank; /* Ранг ветвей */
 
   /* Смещения и размер подматриц CС для сборки в корневом процессе (ветви) */
@@ -52,12 +46,16 @@ void PMATMAT_2(int *n, double *A, double *B, double *C, int *p, MPI_Comm comm) {
   /* Типы данных и массивы для создаваемых типов */
   MPI_Datatype typeb, typec, types[2];
 
-  int  blen[2];
+  int  block_length[2];
   int i, j, k;
   int periods[2], remains[2];
   MPI_Aint sizeofdouble, disp[2];
-  /* Коммуникаторы для 2D решетки, для подрешеток 1D, и копии */
-  /* коммуникатора comm */
+
+  /* Коммуникаторы для 2D решетки, для подрешеток 1D, и копии коммуникатора comm */
+  // comm_2D – commutator for 2D grid
+  // comm_1D[0] – commutator for 
+  // comm_1D[1] – commutator for
+  // pcomm – copy of comm;
   MPI_Comm comm_2D, comm_1D[2], pcomm;
 
   /* Создаем новый коммуникатор */
@@ -68,21 +66,33 @@ void PMATMAT_2(int *n, double *A, double *B, double *C, int *p, MPI_Comm comm) {
   MPI_Bcast(p, 2, MPI_INT, 0, pcomm);
 
   /* Создаем 2D решетку компьютеров размером p[0]*p[1] */
+  // each dimention is not periodic
   periods[0] = 0;
   periods[1] = 0;
+  // pcomm - input commutator
+  // 2 - number of dimensions
+  // p - array with number of machines in each dimension
+  // logical array of size ndims specifying whether the grid is periodic (true) or not (false) in each dimension
+  // ranking may be reordered (true) or not (false) (logical
+  // comm_2D – new commutator
   MPI_Cart_create(pcomm, 2, p, periods, 0, &comm_2D);
 
-  /* Находим ранги и декартовы координаты ветвей в этой решетке */
+  /* Находим ранги и декартовы координаты ветвей в этой решетке */
   MPI_Comm_rank(comm_2D, &rank);
+  // 2 – length of coords
   MPI_Cart_coords(comm_2D, rank, 2, coords);
 
   /* Нахождение коммуникаторов для подрешеток 1D для рассылки полос
    * матриц A и B */
-  for(i = 0; i < 2; i++)
-       { for(j = 0; j < 2; j++)
-           remains[j] = (i == j);
-           MPI_Cart_sub(comm_2D, remains, &comm_1D[i]);
-       }
+  for(i = 0; i < 2; i++) { 
+    for(j = 0; j < 2; j++)
+      remains[j] = (i == j);
+    // the ith entry of remain_dims specifies whether the ith dimension is kept in the subgrid (true) or is dropped (false) (logical vector)
+    // comm_1D[0] – X dimension 
+    // comm_1D[1] – Y dimension
+    MPI_Cart_sub(comm_2D, remains, &comm_1D[i]);
+  }
+
   /* Во всех ветвях задаем подматрицы (полосы) */
   /* Здесь предполагается, что деление без остатка */
   nn[0] = n[0]/p[0];
@@ -91,50 +101,60 @@ void PMATMAT_2(int *n, double *A, double *B, double *C, int *p, MPI_Comm comm) {
    #define BB(i,j) BB[nn[1]*i+j]
    #define CC(i,j) CC[nn[1]*i+j]
 
+  // number of rows in stripe by width of A (height of B)
   AA = (double *)malloc(nn[0] * n[1] * sizeof(double));
   BB = (double *)malloc(n[1] * nn[1] * sizeof(double));
   CC = (double *)malloc(nn[0] * nn[1] * sizeof(double));
 
-  /* Работа нулевой ветви */
+  /* Работа нулевой ветви */
   if(rank == 0) {
-      /* Задание типа данных для вертикальной полосы в  В
-       * Этот тип создать необходимо, т.к. в языке С массив в памяти
-       * располагается по строкам. Для массива А такой тип создавать
-       * нет необходимости, т.к. там передаются горизонтальные полосы,
-       * а они в памяти расположены непрерывно. */
+        /* Задание типа данных для вертикальной полосы в В
+         * Этот тип создать необходимо, т.к. в языке С массив в памяти
+         * располагается по строкам. Для массива А такой тип создавать
+         * нет необходимости, т.к. там передаются горизонтальные полосы,
+         * а они в памяти расположены непрерывно. */
+        // Unite vertical stripes of B in vector
+        // n[1] – height of B (number of blocks)
+        // nn[1] – number of elements in each block
+        // n[2] – number of elements between each block
         MPI_Type_vector(n[1], nn[1], n[2], MPI_DOUBLE, &types[0]);
-    /* и корректируем диапазон размера полосы */
+        /* и корректируем диапазон размера полосы */
+        // extent – размер
         MPI_Type_extent(MPI_DOUBLE, &sizeofdouble);
-        blen[0]  = 1;
-        blen[1]  = 1; 
-        disp[0]  = 0;
+        block_length[0]  = 1; //number of elements in 0th block
+        block_length[1]  = 1;
+        disp[0]  = 0; 
         disp[1]  = sizeofdouble * nn[1];
-        types[1] = MPI_UB;
-        MPI_Type_struct(2, blen, disp, types, &typeb);
+        types[1] = MPI_UB; // upperbound
+        MPI_Type_struct(2, block_length, disp, types, &typeb);
         MPI_Type_commit(&typeb);
-    /* Вычисление размера подматрицы BB и смещений каждой
-     * подматрицы в матрице B. Подматрицы BB упорядочены в B
-     * в соответствии с порядком номеров компьютеров в решетке,
-     * т.к. массивы расположены в памяти по строкам, то подматрицы
-     * BB в памяти (в B) должны располагаться в следующей
-     * последовательности:  BB0, BB1,.... */
-        dispb =  (int *)malloc(p[1] * sizeof(int));
+
+        /* Вычисление размера подматрицы BB и смещений каждой
+         * подматрицы в матрице B. Подматрицы BB упорядочены в B
+         * в соответствии с порядком номеров компьютеров в решетке,
+         * т.к. массивы расположены в памяти по строкам, то подматрицы
+         * BB в памяти (в B) должны располагаться в следующей
+         * последовательности:  BB0, BB1,.... */
+        // displacements
+        dispb = (int *)malloc(p[1] * sizeof(int));
+        // size of submatrices (stripes)
         countb = (int *)malloc(p[1] * sizeof(int));
-        for(j = 0; j < p[1]; j++) { 
+        for (j = 0; j < p[1]; j++) { 
           dispb[j] = j;
           countb[j] = 1;
         }
-     /* Задание типа данных для подматрицы CC в C */
+
+        /* Задание типа данных для подматрицы CC в C */
         MPI_Type_vector(nn[0], nn[1], n[2], MPI_DOUBLE, &types[0]);
-     /* и корректируем размер диапазона */
-        MPI_Type_struct(2, blen, disp, types, &typec);
+        /* и корректируем размер диапазона */
+        MPI_Type_struct(2, block_length, disp, types, &typec);
         MPI_Type_commit(&typec);
-      /* Вычисление размера подматрицы CС и смещений каждой
-       * подматрицы в матрице C. Подматрицы CC упорядочены в С
-       * в соответствии с порядком номеров компьютеров в решетке,
-       * т.к. массивы расположены в памяти по строкам, то подматрицы
-       * СС в памяти (в С) должны располагаться в следующей
-       * последовательности:  СС0, СС1, СС2, CC3, СС4, СС5, СС6, СС7. */
+        /* Вычисление размера подматрицы CС и смещений каждой
+         * подматрицы в матрице C. Подматрицы CC упорядочены в С
+         * в соответствии с порядком номеров компьютеров в решетке,
+         * т.к. массивы расположены в памяти по строкам, то подматрицы
+         * СС в памяти (в С) должны располагаться в следующей
+         * последовательности:  СС0, СС1, СС2, CC3, СС4, СС5, СС6, СС7. */
         dispc = (int *) malloc(p[0] * p[1] * sizeof(int));
         countc = (int *) malloc(p[0] * p[1] * sizeof(int));
         for (i = 0; i < p[0]; i++) { 
@@ -165,7 +185,7 @@ void PMATMAT_2(int *n, double *A, double *B, double *C, int *p, MPI_Comm comm) {
   /* 4. Передача подматриц  BB в измерении x */
   MPI_Bcast(BB, n[1]*nn[1], MPI_DOUBLE, 0, comm_1D[0]);
 
-  /* 5. Вычисление подматриц СС в каждой ветви */
+  /* 5. Вычисление подматриц СС в каждой ветви */
   for(i = 0; i < nn[0]; i++) { 
     for(j = 0; j < nn[1]; j++) { 
       CC(i,j) = 0.0;
@@ -197,10 +217,9 @@ void PMATMAT_2(int *n, double *A, double *B, double *C, int *p, MPI_Comm comm) {
 }
 
 /* Главная программа */
-
 int main(int argc, char **argv) {
 
-  int        size, MyP, n[3], p[2], i, j, k;
+  int        size, current_process, n[3], p[2], i, j, k;
   int        dims[NUM_DIMS], periods[NUM_DIMS];
   double     *A, *B, *C;
   int        reorder = 0;
@@ -215,7 +234,7 @@ int main(int argc, char **argv) {
   MPI_Comm_size(MPI_COMM_WORLD, &size);
 
   /* и свой собственный номер (ранг) */
-  MPI_Comm_rank(MPI_COMM_WORLD, &MyP);
+  MPI_Comm_rank(MPI_COMM_WORLD, &current_process);
 
   /* Обнуляем массив dims и заполняем массив periods для топологии
    * "двумерная решетка" */
@@ -230,14 +249,14 @@ int main(int argc, char **argv) {
   /* Создаем топологию "двумерная решетка" с communicator(ом) comm */
   MPI_Cart_create(MPI_COMM_WORLD, NUM_DIMS, dims, periods, reorder, &comm);
 
-  /* В первой ветви выделяем в памяти место для исходных матриц */
-  if(MyP == 0) {
+  /* В первой ветви выделяем в памяти место для исходных матриц */
+  if(current_process == 0) {
     /* Задаем размеры матриц и размеры двумерной решетки компьютеров */
     n[0] = M;
     n[1] = N;
     n[2] = K;
-    p[0] = dims[0];//P0;
-    p[1] = dims[1];//P1;
+    p[0] = dims[0]; //P0;
+    p[1] = dims[1]; //P1;
     A = (double *)malloc(M * N * sizeof(double));
     B = (double *)malloc(N * K * sizeof(double));
     C = (double *)malloc(M * K * sizeof(double));
@@ -260,15 +279,15 @@ int main(int argc, char **argv) {
   /* Все ветви вызывают функцию перемножения матриц */
   PMATMAT_2(n, A, B, C, p, comm);
 
-/* Умножение завершено. Каждая ветвь умножила свою полосу строк матрицы A на
- * полосу столбцов матрицы B. Результат находится в нулевой ветви.
- * Засекаем время и результат печатаем */
+  /* Умножение завершено. Каждая ветвь умножила свою полосу строк матрицы A на
+  * полосу столбцов матрицы B. Результат находится в нулевой ветви.
+  * Засекаем время и результат печатаем */
   gettimeofday(&tv2, (struct timezone*)0);
   dt1 = (tv2.tv_sec - tv1.tv_sec) * 1000000 + tv2.tv_usec - tv1.tv_usec;
-  printf("MyP = %d Time = %d\n", MyP, dt1);
+  printf("current_process = %d Time = %d\n", current_process, dt1);
 
   /* Для контроля 0-я ветвь печатает результат */
-  if(MyP == 0) { 
+  if(current_process == 0) { 
     for(i = 0; i < M; i++) { 
       for(j = 0; j < K; j++)
         printf(" %3.1f",C(i,j));
@@ -277,12 +296,12 @@ int main(int argc, char **argv) {
   }
 /* Все ветви завершают системные процессы, связанные с топологией comm
 * и завершают выполнение программы */
-  if(MyP == 0) { 
+  if(current_process == 0) { 
     free(A);
     free(B);
     free(C);
   }
   MPI_Comm_free(&comm);
   MPI_Finalize();
-  return(0);
+  return 0;
 }
