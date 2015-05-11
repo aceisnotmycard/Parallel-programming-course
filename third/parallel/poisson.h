@@ -11,17 +11,17 @@
 #define TALK_BELOW 101
 
 namespace InputData {
-    double X;
-    double Y;
-    double Z;
+    static double X = 2.0;
+    static double Y = 2.0;
+    static double Z = 2.0;
 
-    int cells_x;
-    int cells_y;
-    int cells_z;
+    static int cells_x = 20;
+    static int cells_y = 20;
+    static int cells_z = 20;
 
-    double e;
+    static double e = 0.0001;
 
-    int a;
+    static int a = -1;
 
     double ro(double x, double y, double z);
 

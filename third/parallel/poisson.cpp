@@ -4,10 +4,11 @@
 
 #include <mpi.h>
 #include <math.h>
+#include <ostream>
+#include <iostream>
 #include "poisson.h"
 
 int get_chunk_size(int given_rank, int rank);
-//int calculate_shift(int given_rank);
 
 double InputData::border(double x, double y, double z) {
     return x + y + z;
@@ -38,7 +39,6 @@ Layer init(int rank, int size) {
             }
         }
     }
-
     return layer;
 }
 
@@ -60,14 +60,6 @@ int get_chunk_size(int given_rank, int size) {
     return basic_chunk + (given_rank < rest ? 1 : 0);
 }
 
-//int calculate_shift(int given_rank) {
-//    int result = 0;
-//    for (int i = 0; i < given_rank; i++) {
-//        result += get_chunk_size(i);
-//    }
-//    return result;
-//}
-
 //
 bool iteration_step(Layer& layer) {
     bool is_over = true;
@@ -77,35 +69,45 @@ bool iteration_step(Layer& layer) {
     double powhx = pow(hx(), 2);
     double powhy = pow(hy(), 2);
     double powhz = pow(hz(), 2);
-    double* received_from_above;
-    double* received_from_below;
+    double* received_from_above = new double[layer.size_x * layer.size_y];
+    double* received_from_below = new double[layer.size_x * layer.size_y];
+    double* send_to_below = layer.get_row(layer.size_z - 1);
+    double* send_to_above = layer.get_row(0);
 
-    //TODO: Unify send and recieve
+    MPI_Request reqs1, reqs2, reqr1, reqr2;
 
-    // send data down if we're not the last layer
-    // and receive
     if (!layer.is_lower()) {
-        double* send_to_below;
-        send_to_below = layer.get_row(layer.size_z - 1);
+        MPI_Isend(send_to_above, layer.size_x * layer.size_y, MPI_DOUBLE, (layer.rank + 1) % layer.size, TALK_ABOVE,
+                  MPI_COMM_WORLD, &reqs2);
 
-        MPI_Send(send_to_below, layer.size_x * layer.size_y, MPI_DOUBLE, layer.rank + 1, TALK_BELOW, MPI_COMM_WORLD);
-        MPI_Recv(received_from_below, layer.size_x * layer.size_y, MPI_DOUBLE, layer.rank + 1, TALK_BELOW, MPI_COMM_WORLD,
-                 0);
     }
 
-    // send data up if we're not the first layer
-    // and receive
     if (!layer.is_upper()) {
-        double* send_to_above;
-        send_to_above = layer.get_row(0);
+        MPI_Isend(send_to_below, layer.size_x * layer.size_y, MPI_DOUBLE, (layer.rank - 1) % layer.size, TALK_BELOW, MPI_COMM_WORLD, &reqs1);
 
-        MPI_Send(send_to_above, layer.size_x * layer.size_y, MPI_DOUBLE, layer.rank - 1, TALK_ABOVE, MPI_COMM_WORLD);
-        MPI_Recv(received_from_above, layer.size_x * layer.size_y, MPI_DOUBLE, layer.rank - 1, TALK_ABOVE, MPI_COMM_WORLD,
-                 0);
     }
+    if (!layer.is_lower()) {
+        MPI_Irecv(received_from_below, layer.size_x * layer.size_y, MPI_DOUBLE, (layer.rank + 1) % layer.size, TALK_BELOW, MPI_COMM_WORLD,
+                  &reqr2);
+
+    }
+    if (!layer.is_upper()) {
+        MPI_Irecv(received_from_above, layer.size_x * layer.size_y, MPI_DOUBLE, (layer.rank - 1) % layer.size, TALK_ABOVE, MPI_COMM_WORLD,
+                  &reqr1);
+
+    }
+
+    if (!layer.is_lower()) {
+        MPI_Wait(&reqs2, MPI_STATUS_IGNORE);
+        MPI_Wait(&reqr2, MPI_STATUS_IGNORE);
+    }
+    if (!layer.is_upper()) {
+        MPI_Wait(&reqs1, MPI_STATUS_IGNORE);
+        MPI_Wait(&reqr1, MPI_STATUS_IGNORE);
+    }
+
 
     double c = 2/powhx + 2/powhy + 2/powhz + InputData::a;
-
     for (int i = 1; i < layer.size_x - 1; i++) {
         for (int j = 1; j < layer.size_y - 1; j++) {
             for (int k = 0; k < layer.size_z; k++) {
@@ -129,6 +131,5 @@ bool iteration_step(Layer& layer) {
             }
         }
     }
-
     return is_over;
 }
