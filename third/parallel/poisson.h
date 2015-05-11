@@ -7,7 +7,8 @@
 
 #include "layer.h"
 
-int rank, size;
+#define TALK_ABOVE 100
+#define TALK_BELOW 101
 
 namespace InputData {
     double X;
@@ -22,7 +23,7 @@ namespace InputData {
 
     int a;
 
-    double ro(int x, int y, int z);
+    double ro(double x, double y, double z);
 
     double border(double x, double y, double z);
 };
@@ -31,8 +32,8 @@ double hz();
 double hy();
 double hx();
 
-Layer init();
+Layer init(int rank, int size);
 
-bool iteration_step();
+bool iteration_step(Layer& layer);
 
 #endif //PARALLEL_POISSON_H
