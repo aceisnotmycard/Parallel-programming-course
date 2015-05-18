@@ -9,16 +9,16 @@
 #include <time.h>
 #include <sys/time.h>
 
-/* NUM_DIMS - размер декартовой топологии. "двумерная решетка" P0xP1 */
+/* NUM_DIMS - размер декартовой топологии. "двумерная решетка" P0xP1 */
 #define NUM_DIMS 2
 #define P0 2
 #define P1 2
 /* Задаем размеры матриц A = MxN, B = NxK и C = MxK (Эти размеры значимы в
  * ветви 0)
  */
-#define M 8
-#define N 8
-#define K 8
+#define M 200
+#define N 200
+#define K 200
 
 #define A(i,j) A[N*i+j]
 #define B(i,j) B[K*i+j]
@@ -53,8 +53,8 @@ void PMATMAT_2(int *n, double *A, double *B, double *C, int *p, MPI_Comm comm) {
 
   /* Коммуникаторы для 2D решетки, для подрешеток 1D, и копии коммуникатора comm */
   // comm_2D – commutator for 2D grid
-  // comm_1D[0] – commutator for 
-  // comm_1D[1] – commutator for
+  // comm_1D[0] – commutator for A
+  // comm_1D[1] – commutator for B
   // pcomm – copy of comm;
   MPI_Comm comm_2D, comm_1D[2], pcomm;
 
@@ -73,7 +73,7 @@ void PMATMAT_2(int *n, double *A, double *B, double *C, int *p, MPI_Comm comm) {
   // 2 - number of dimensions
   // p - array with number of machines in each dimension
   // logical array of size ndims specifying whether the grid is periodic (true) or not (false) in each dimension
-  // ranking may be reordered (true) or not (false) (logical
+  // ranking may be reordered (true) or not (false) (logical)
   // comm_2D – new commutator
   MPI_Cart_create(pcomm, 2, p, periods, 0, &comm_2D);
 
@@ -160,8 +160,8 @@ void PMATMAT_2(int *n, double *A, double *B, double *C, int *p, MPI_Comm comm) {
         for (i = 0; i < p[0]; i++) { 
           for (j = 0; j < p[1]; j++) { 
             dispc[i*p[1]+j] = (i*p[1]*nn[0] + j);
+            countc[i*p[1]+j] = 1;
           }
-          countc[i*p[1]+j] = 1;
         } 
   } /* Нулевая ветвь завершает подготовительную работу */
 
@@ -275,25 +275,24 @@ int main(int argc, char **argv) {
 
   /* Засекаем начало умножения матриц во всех ветвях */
   /* Для засечения времени */
-  gettimeofday(&tv1, (struct timezone*)0);
+  double start_time = MPI_Wtime();
   /* Все ветви вызывают функцию перемножения матриц */
   PMATMAT_2(n, A, B, C, p, comm);
 
   /* Умножение завершено. Каждая ветвь умножила свою полосу строк матрицы A на
   * полосу столбцов матрицы B. Результат находится в нулевой ветви.
   * Засекаем время и результат печатаем */
-  gettimeofday(&tv2, (struct timezone*)0);
-  dt1 = (tv2.tv_sec - tv1.tv_sec) * 1000000 + tv2.tv_usec - tv1.tv_usec;
-  printf("current_process = %d Time = %d\n", current_process, dt1);
+  double end_time = MPI_Wtime();
+  printf("TIME: %f\n", end_time - start_time);
 
   /* Для контроля 0-я ветвь печатает результат */
-  if(current_process == 0) { 
-    for(i = 0; i < M; i++) { 
-      for(j = 0; j < K; j++)
-        printf(" %3.1f",C(i,j));
-      printf("\n");
-    }
-  }
+  // if(current_process == 0) { 
+  //   for(i = 0; i < M; i++) { 
+  //     for(j = 0; j < K; j++)
+  //       printf(" %3.1f",C(i,j));
+  //     printf("\n");
+  //   }
+  // }
 /* Все ветви завершают системные процессы, связанные с топологией comm
 * и завершают выполнение программы */
   if(current_process == 0) { 
