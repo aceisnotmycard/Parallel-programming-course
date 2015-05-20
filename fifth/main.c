@@ -90,7 +90,7 @@ void prepare_tasks(int rank) {
 }
 
 void* worker() {
-	int i;
+	long long i;
 	int task;
 	task = current_task;
 	pthread_mutex_lock(&mutex);
@@ -99,16 +99,15 @@ void* worker() {
 
 	while (task != -1) {
 		int task_size = tasks_list[task];
-		for (i = 0; i < task_size; i++) {
+		for (i = 0; i < task_size * SIZE_MULTIPLIER * SIZE_MULTIPLIER; i++) {
 			sqrt(i);
 		}
-		printf("Worker at %d process calculated value for %d task\n", rank, task);
-
 		pthread_mutex_lock(&mutex);
 		is_worker_ready = 0;
 		pthread_mutex_unlock(&mutex);
 
 		while(task == current_task) {}
+		printf("Worker at %d process calculated value for %d task\n", rank, task);
 		task = current_task;
 	}
 
@@ -161,7 +160,7 @@ void listener() {
 // returns -1 if there is no free tasks
 int find_neartest_free_task(int* tasks_status) {
 	int i;
-	for (i = 0; i < TASKS_LIST_SIZE; i++) {
+	for (i = rank; i < TASKS_LIST_SIZE; i += size) {
 		if(tasks_status[i] == 0) {
 			return i;
 		}
