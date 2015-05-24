@@ -18,19 +18,6 @@ int iter_counter;
 int is_worker_ready;
 // mutex
 pthread_mutex_t mutex;
-// array with sizes of tasks
-int* tasks_list;
-// current element of tasks_list 
-// that should be processed by worker
-// if it is equals to -1 than work is done 
-int current_task;
-// prepares data in 0 process
-// TODO: remove argument
-// void prepare_tasks(int rank);
-
-// void* worker();
-
-// void listener();
 
 void* task_parser();
 void task_getter();
