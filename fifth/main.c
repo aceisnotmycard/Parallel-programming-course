@@ -5,7 +5,8 @@
 #include <stdlib.h>
 
 #define TASKS_LIST_SIZE 20
-#define SIZE_MULTIPLIER 555555
+#define SIZE_MULTIPLIER 1234000
+#define N 1000
 
 // for MPI
 int rank, size;
@@ -13,6 +14,7 @@ MPI_Comm comm;
 // logical variable
 // 1 if worker is done and waiting for more
 // 0 if it is busy
+int iter_counter;
 int is_worker_ready;
 // mutex
 pthread_mutex_t mutex;
@@ -22,17 +24,20 @@ int* tasks_list;
 // that should be processed by worker
 // if it is equals to -1 than work is done 
 int current_task;
-
 // prepares data in 0 process
 // TODO: remove argument
-void prepare_tasks(int rank);
+// void prepare_tasks(int rank);
 
-void* worker();
+// void* worker();
 
-void listener();
+// void listener();
+
+void* task_parser();
+void task_getter();
+int get_task_from_queue(int iteration);
 
 // returns -1 if there is no free tasks
-int find_neartest_free_task(int* tasks_status);
+// int find_neartest_free_task(int* tasks_status);
 
 int main(int argc, char** argv) {
 	int provided;
@@ -44,8 +49,8 @@ int main(int argc, char** argv) {
 	MPI_Comm_rank(comm, &rank);
 
 	//prepare data
-	tasks_list = (int*) malloc(TASKS_LIST_SIZE * sizeof(int));
-	prepare_tasks(rank);
+	//tasks_list = (int*) malloc(TASKS_LIST_SIZE * sizeof(int));
+	//prepare_tasks(rank);
 
 	//prepare working thread
 	pthread_t working_thread;
@@ -63,11 +68,11 @@ int main(int argc, char** argv) {
 		perror("Cannot init mutex");
 		abort();	
 	}
-	pthread_create(&working_thread, &attrs, worker, NULL);
+	pthread_create(&working_thread, &attrs, task_parser, NULL);
 	pthread_attr_destroy(&attrs);
 
 	// start listening for messages from another processes
-	listener();
+	task_getter();
 
 	// ok, going home
 	if (pthread_join(working_thread, NULL) != 0) {
@@ -78,92 +83,84 @@ int main(int argc, char** argv) {
 	return 0;
 }
 
-void prepare_tasks(int rank) {
-	int i;
-	if (rank == 0) {
-		for (i = 0; i < TASKS_LIST_SIZE; i++) {
-			tasks_list[i] = (SIZE_MULTIPLIER * i) % size;
-		}
-	}
-	current_task = rank;
-	MPI_Bcast(tasks_list, TASKS_LIST_SIZE, MPI_INT, 0, comm);
-}
-
-void* worker() {
-	long long i;
-	int task;
-	task = current_task;
-	pthread_mutex_lock(&mutex);
-	is_worker_ready = 0;
-	pthread_mutex_unlock(&mutex);
-
-	while (task != -1) {
-		int task_size = tasks_list[task];
-		for (i = 0; i < task_size * SIZE_MULTIPLIER * SIZE_MULTIPLIER; i++) {
-			sqrt(i);
-		}
-		pthread_mutex_lock(&mutex);
-		is_worker_ready = 0;
-		pthread_mutex_unlock(&mutex);
-
-		while(task == current_task) {}
-		printf("Worker at %d process calculated value for %d task\n", rank, task);
-		task = current_task;
-	}
-
-	return NULL;
-}
-
-void listener() {
-	int process;
+void task_getter() {
+	int* states = (int*) malloc(sizeof(int) * size);
 	int worker_state;
-	//int free_task;
-	// logical array
-	// if i-th element is set to 1 then such task is calculated
-	int* tasks_status = (int*) malloc(TASKS_LIST_SIZE * sizeof(int));
-
-	// current task of i-th process
-	int* current_tasks = (int*) malloc(size * sizeof(int));
-	tasks_status[rank] = 1;
-
-	// if current_state is set to 1 than work is completed
 	int current_state;
-
-	int everyone_is_completed;
-	// main loop
-	while (1) {
-		// Exchanging information with other processes
+	int everyone_is_completed = 0;
+	int sum;
+	int task;
+	int counter;
+	current_task = rank;
+	iter_counter = 1;
+	while(1) {
+		
+		// check is everyone complete
 		current_state = (current_task == -1) ? 1 : 0;
 		MPI_Allreduce(&current_state, &everyone_is_completed, 1, MPI_INT, MPI_PROD, comm);
 		if (everyone_is_completed) {
+			printf("bye-bye\n");
 			break;
 		}
-		MPI_Allgather(&current_task, 1, MPI_INT, current_tasks, 1, MPI_INT, comm);
-		for (process = 0; process < size; process++) {
-			tasks_status[current_tasks[process]] = 1;
-		}
+
+		//check how many processes complete
 		pthread_mutex_lock(&mutex);
 		worker_state = is_worker_ready;
 		pthread_mutex_unlock(&mutex);
 
-		// if worker is ready then find available task
-		if (worker_state == 0) {
-			printf("Worker at %d process taking %d task\n", rank, current_task);
-			current_task = find_neartest_free_task(tasks_status);
+		MPI_Allgather(&worker_state, 1, MPI_INT, states, 1, MPI_INT, comm);
+
+		//get new task
+		counter = 0;
+		for (int i = 0; i < size; i++) {
+			if (states[i] == 1) {
+				counter++;
+				if (rank == i) {
+					task = get_task_from_queue(iter_counter+counter);
+					printf("%d\n", iter_counter + counter);
+					counter = 1;
+					break;
+				}
+			}
+		}
+		// get number of iterations
+		MPI_Allreduce(&counter, &sum, 1, MPI_INT, MPI_SUM, comm);
+		iter_counter += sum;
+
+		if (worker_state) {
 			pthread_mutex_lock(&mutex);
-				is_worker_ready = 1;
+			current_task = task;
+			is_worker_ready = 0;
 			pthread_mutex_unlock(&mutex);
 		}
 	}
 }
 
-// returns -1 if there is no free tasks
-int find_neartest_free_task(int* tasks_status) {
-	int i;
-	for (i = rank; i < TASKS_LIST_SIZE; i += size) {
-		if(tasks_status[i] == 0) {
-			return i;
+void* task_parser() {
+	int task;
+	double result;
+	is_worker_ready = 0;
+	int iwr;
+	while (task != -1) {
+		pthread_mutex_lock(&mutex);
+		iwr = is_worker_ready;
+		pthread_mutex_unlock(&mutex);
+		if (!iwr) {
+			pthread_mutex_lock(&mutex);
+			task = current_task;
+			pthread_mutex_unlock(&mutex);
+			for (int i = 0; i < SIZE_MULTIPLIER * task; i++) {
+				result+=sqrt(i);
+			}
+			pthread_mutex_lock(&mutex);
+			is_worker_ready = 1;
+			pthread_mutex_unlock(&mutex);
 		}
 	}
-	return -1;
+	return NULL;
+}
+
+
+int get_task_from_queue(int iteration) {
+	return iteration < N ? abs((rank - (iteration%size))) : -1;
 }
